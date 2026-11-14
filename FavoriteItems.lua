@@ -1,10 +1,13 @@
 -- FavoriteItems
--- Mark items as favorites (a small heart in the icon's upper left corner) and
--- get a warning when a favorite item is sold to a merchant.
+-- Mark specific items as favorites (a small heart in the icon's upper left
+-- corner) and get a warning when a favorite item is sold to a merchant.
+--
+-- Favorites are individual items, not item types: each one is stored by its
+-- item GUID, so marking one Linen Cloth or one copy of a sword leaves the
+-- others alone.
 --
 -- Works with Baganator (uses its corner-widget and region API) and falls back
 -- to the default Blizzard bag and bank frames when Baganator isn't loaded.
--- Favorites are stored per item ID and shared by all characters on the account.
 
 local ADDON_NAME = ...
 
@@ -34,48 +37,86 @@ local function ItemIDFromLink(link)
   return id and tonumber(id)
 end
 
-local function GetBagSlotItem(bag, slot)
-  if C_Container and C_Container.GetContainerItemInfo then
-    local info = C_Container.GetContainerItemInfo(bag, slot)
-    if info then
-      return info.itemID, info.hyperlink
-    end
+local function GUIDAt(bag, slot)
+  if not (ItemLocation and C_Item and C_Item.GetItemGUID) then
     return nil
   end
-  if GetContainerItemLink then
-    local link = GetContainerItemLink(bag, slot)
-    return ItemIDFromLink(link), link
+  local location = ItemLocation:CreateFromBagAndSlot(bag, slot)
+  if location and C_Item.DoesItemExist(location) then
+    return C_Item.GetItemGUID(location)
   end
 end
 
+-- itemID, link, guid of whatever sits in a bag slot
+local function GetBagSlotItem(bag, slot)
+  local itemID, link
+  if C_Container and C_Container.GetContainerItemInfo then
+    local info = C_Container.GetContainerItemInfo(bag, slot)
+    if info then
+      itemID, link = info.itemID, info.hyperlink
+    end
+  elseif GetContainerItemLink then
+    link = GetContainerItemLink(bag, slot)
+    itemID = ItemIDFromLink(link)
+  end
+  if itemID then
+    return itemID, link, GUIDAt(bag, slot)
+  end
+end
+
+local function NumBagSlots(bag)
+  if C_Container and C_Container.GetContainerNumSlots then
+    return C_Container.GetContainerNumSlots(bag)
+  end
+  return GetContainerNumSlots and GetContainerNumSlots(bag) or 0
+end
+
+-- All items in the character's carried bags: list of {guid, id, link}
+local function ScanBags()
+  local list = {}
+  for bag = 0, (NUM_BAG_SLOTS or 4) do
+    for slot = 1, NumBagSlots(bag) do
+      local itemID, link, guid = GetBagSlotItem(bag, slot)
+      if guid then
+        table.insert(list, { guid = guid, id = itemID, link = link })
+      end
+    end
+  end
+  return list
+end
+
 -------------------------------------------------------------------------------
--- Favorites storage
+-- Favorites storage (FavoriteItemsDB.guids[guid] = { id = itemID, link = link })
 -------------------------------------------------------------------------------
 
-local function IsFavorite(itemID)
-  return itemID ~= nil and db ~= nil and db.items[itemID] ~= nil
+local function IsFavorite(guid)
+  return guid ~= nil and db ~= nil and db.guids[guid] ~= nil
 end
 
 local RefreshAllHearts -- defined further down
 
-local function SetFavorite(itemID, link, on)
-  if not itemID or not db then
+local function SetFavorite(guid, itemID, link, on)
+  if not guid or not db then
     return
   end
   if on then
-    db.items[itemID] = link or db.items[itemID] or true
+    db.guids[guid] = { id = itemID, link = link }
   else
-    db.items[itemID] = nil
+    db.guids[guid] = nil
   end
   RefreshAllHearts()
 end
 
-local function ToggleFavorite(itemID, link)
+local function ToggleFavorite(guid, itemID, link)
   if not itemID then
     return
   end
-  local on = not IsFavorite(itemID)
-  SetFavorite(itemID, link, on)
+  if not guid then
+    Print("Only items this character is carrying (or has in the open bank) can be marked.")
+    return
+  end
+  local on = not IsFavorite(guid)
+  SetFavorite(guid, itemID, link, on)
   local name = link or ("item " .. itemID)
   if on then
     Print(HEART_INLINE .. " " .. name .. " is now a favorite.")
@@ -87,7 +128,6 @@ end
 -- Small public API for other addons / macros.
 FavoriteItems = {
   IsFavorite = IsFavorite,
-  SetFavorite = function(itemID, on) SetFavorite(itemID, nil, on) end,
 }
 
 -------------------------------------------------------------------------------
@@ -153,9 +193,19 @@ local function BlizzardBagSlot(button)
   end
 end
 
+-- itemID, link, guid for an item button (guid is nil for other characters'
+-- items shown from Baganator's cache)
 local function GetButtonItem(button)
-  if button.BGR then
-    return button.BGR.itemID, button.BGR.itemLink
+  local info = button.BGR
+  if info then
+    if not info.itemID then
+      return nil
+    end
+    local guid = info.guid
+    if not guid and info.itemLocation and C_Item.DoesItemExist(info.itemLocation) then
+      guid = C_Item.GetItemGUID(info.itemLocation)
+    end
+    return info.itemID, info.itemLink, guid
   end
   local bag, slot = BlizzardBagSlot(button)
   if bag and slot then
@@ -228,8 +278,8 @@ local function UpdateBlizzardHearts()
     return
   end
   for _, button in ipairs(CollectItemButtons()) do
-    local itemID = GetButtonItem(button)
-    local fav = IsFavorite(itemID)
+    local _, _, guid = GetButtonItem(button)
+    local fav = IsFavorite(guid)
     if fav and not button.FavoriteItemsHeart then
       local holder = CreateFrame("Frame", nil, button)
       holder:SetAllPoints(button)
@@ -265,7 +315,14 @@ if useBaganator then
     "favoriteitems_heart",
     function(corner, details)
       -- Must return true/false; nil would mean "data not ready yet".
-      return IsFavorite(details and details.itemID)
+      if not details or not details.itemID then
+        return false
+      end
+      local guid = details.guid
+      if not guid and details.itemLocation and C_Item.DoesItemExist(details.itemLocation) then
+        guid = C_Item.GetItemGUID(details.itemLocation)
+      end
+      return IsFavorite(guid)
     end,
     function(itemButton)
       local frame = CreateFrame("Frame", nil, itemButton)
@@ -290,17 +347,19 @@ local toggles = {}       -- all "Favorites" buttons
 local ticker
 
 local function ShowCatcherTooltip(catcher)
-  local _, link = GetButtonItem(catcher.itemButton)
+  local _, link, guid = GetButtonItem(catcher.itemButton)
   if not link then
     return
   end
   GameTooltip:SetOwner(catcher, "ANCHOR_RIGHT")
   GameTooltip:SetHyperlink(link)
   GameTooltip:AddLine(" ")
-  if IsFavorite(ItemIDFromLink(link)) then
+  if not guid then
+    GameTooltip:AddLine("Can't be marked from here", 0.6, 0.6, 0.6)
+  elseif IsFavorite(guid) then
     GameTooltip:AddLine(HEART_INLINE .. " Click to remove from favorites", 1, 0.44, 0.66)
   else
-    GameTooltip:AddLine(HEART_INLINE .. " Click to mark as favorite", 1, 0.44, 0.66)
+    GameTooltip:AddLine(HEART_INLINE .. " Click to mark this item as favorite", 1, 0.44, 0.66)
   end
   GameTooltip:Show()
 end
@@ -322,9 +381,9 @@ local function GetCatcher(button)
   catcher:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
 
   catcher:SetScript("OnClick", function(self)
-    local itemID, link = GetButtonItem(self.itemButton)
+    local itemID, link, guid = GetButtonItem(self.itemButton)
     if itemID then
-      ToggleFavorite(itemID, link)
+      ToggleFavorite(guid, itemID, link)
       if GameTooltip:IsOwned(self) then
         ShowCatcherTooltip(self)
       end
@@ -474,7 +533,7 @@ end
 -- Sold-favorite warning
 -------------------------------------------------------------------------------
 
-local pendingSold = {}   -- list of { id, link, count }
+local pendingSold = {}   -- warnings in the popup: list of { id, link, count }
 local warning
 
 local function FindBuybackIndex(itemID)
@@ -588,85 +647,164 @@ local function UpdateWarning()
   warning:Show()
 end
 
-local function WarnSold(itemID, link, count)
-  for _, entry in ipairs(pendingSold) do
-    if entry.id == itemID then
-      entry.count = entry.count + count
-      UpdateWarning()
-      return
-    end
-  end
-  table.insert(pendingSold, { id = itemID, link = link, count = count })
-  UpdateWarning()
-
+local function WarnSold(itemID, link)
   local name = link or ("item " .. itemID)
   Print("|cffff4040Warning:|r you sold your favorite item " .. name .. "!")
   if RaidNotice_AddMessage and RaidWarningFrame and ChatTypeInfo and ChatTypeInfo["RAID_WARNING"] then
     RaidNotice_AddMessage(RaidWarningFrame, HEART_INLINE .. " Favorite item sold: " .. name, ChatTypeInfo["RAID_WARNING"])
   end
   PlaySound(SOUNDKIT and SOUNDKIT.RAID_WARNING or 8959, "Master")
+
+  for _, entry in ipairs(pendingSold) do
+    if entry.id == itemID then
+      entry.count = entry.count + 1
+      UpdateWarning()
+      return
+    end
+  end
+  table.insert(pendingSold, { id = itemID, link = link, count = 1 })
+  UpdateWarning()
 end
 
--- Selling is detected through the merchant's buyback list: every sale (right
--- click, drag to the merchant, Baganator's junk seller...) ends up there.
-local buybackSnapshot
+-- Selling is detected while a merchant is open by combining two things:
+--  * a favorite item (by GUID) disappears from the bags, and
+--  * an item with the same item ID shows up in the merchant's buyback list.
+-- Every way of selling (right click, dragging to the merchant, Baganator's
+-- junk seller) ends up like that. The two can arrive in either order, so
+-- both are kept until they can be matched.
+local sale = nil  -- state for the current merchant visit
 
-local function SnapshotBuyback()
-  local counts, links = {}, {}
+local function BuybackCounts()
+  local counts = {}
   for i = 1, GetNumBuybackItems() do
-    local link = GetBuybackItemLink(i)
-    local id = ItemIDFromLink(link)
+    local id = ItemIDFromLink(GetBuybackItemLink(i))
     if id then
       counts[id] = (counts[id] or 0) + 1
-      links[id] = link
     end
   end
-  return counts, links
+  return counts
 end
 
-local function CheckBuyback()
-  if not merchantOpen or not buybackSnapshot then
+local function StartSaleTracking()
+  sale = {
+    buyback = BuybackCounts(),
+    bagGUIDs = {},     -- guid -> itemID, everything in the bags last time
+    missing = {},      -- favorite guid -> info, gone from bags, not matched yet
+    increases = {},    -- itemID -> new buyback entries not matched yet
+    sold = {},         -- itemID -> list of favorite infos sold this visit
+  }
+  for _, item in ipairs(ScanBags()) do
+    sale.bagGUIDs[item.guid] = item.id
+  end
+end
+
+local function CheckSales()
+  if not merchantOpen or not sale or not db then
     return
   end
-  local counts, links = SnapshotBuyback()
+
+  -- Buyback list changes
+  local counts = BuybackCounts()
+  local decreased = {}
   for id, count in pairs(counts) do
-    local before = buybackSnapshot[id] or 0
-    if count > before and IsFavorite(id) then
-      WarnSold(id, links[id], count - before)
+    local before = sale.buyback[id] or 0
+    if count > before then
+      sale.increases[id] = (sale.increases[id] or 0) + (count - before)
     end
   end
-  buybackSnapshot = counts
+  for id, before in pairs(sale.buyback) do
+    local now = counts[id] or 0
+    if now < before then
+      decreased[id] = before - now
+    end
+  end
+  sale.buyback = counts
+
+  -- Bag changes
+  local bagGUIDs, newItems = {}, {}
+  for _, item in ipairs(ScanBags()) do
+    bagGUIDs[item.guid] = item.id
+    if not sale.bagGUIDs[item.guid] then
+      table.insert(newItems, item)
+    end
+  end
+  for guid in pairs(sale.bagGUIDs) do
+    if not bagGUIDs[guid] and db.guids[guid] then
+      sale.missing[guid] = db.guids[guid]
+    end
+  end
+  sale.bagGUIDs = bagGUIDs
+
+  -- Equipping a favorite at the merchant isn't selling it.
+  if next(sale.missing) then
+    for slot = 1, 19 do
+      local location = ItemLocation:CreateFromEquipmentSlot(slot)
+      if C_Item.DoesItemExist(location) then
+        local guid = C_Item.GetItemGUID(location)
+        if guid then
+          sale.missing[guid] = nil
+        end
+      end
+    end
+  end
+
+  -- A favorite that left the bags + the same item in the buyback list = sold
+  for guid, info in pairs(sale.missing) do
+    local id = info.id
+    if (sale.increases[id] or 0) > 0 then
+      sale.increases[id] = sale.increases[id] - 1
+      sale.missing[guid] = nil
+      db.guids[guid] = nil
+      sale.sold[id] = sale.sold[id] or {}
+      table.insert(sale.sold[id], info)
+      WarnSold(id, info.link)
+    end
+  end
+
+  -- A sold favorite bought back (with the button or the Buyback tab): the
+  -- returning item may get a new GUID, so mark it as a favorite again.
+  for _, item in ipairs(newItems) do
+    local soldList = sale.sold[item.id]
+    if soldList and #soldList > 0 and (decreased[item.id] or 0) > 0 then
+      decreased[item.id] = decreased[item.id] - 1
+      local info = table.remove(soldList)
+      db.guids[item.guid] = { id = item.id, link = item.link or info.link }
+      RefreshAllHearts()
+    end
+  end
 end
 
 -------------------------------------------------------------------------------
 -- Tooltip line
 -------------------------------------------------------------------------------
 
-local function AddTooltipLine(tooltip, itemID)
-  if IsFavorite(itemID) and not tooltip.FavoriteItemsLineAdded then
-    tooltip.FavoriteItemsLineAdded = true
-    tooltip:AddLine(HEART_INLINE .. " Favorite", 1, 0.44, 0.66)
+local function HookTooltips()
+  if not (TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall and Enum and Enum.TooltipDataType) then
+    return
   end
+  TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tooltip, data)
+    if tooltip == GameTooltip and data and IsFavorite(data.guid) then
+      tooltip:AddLine(HEART_INLINE .. " Favorite", 1, 0.44, 0.66)
+    end
+  end)
 end
 
-local function HookTooltips()
-  if TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall and Enum and Enum.TooltipDataType then
-    TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tooltip, data)
-      if tooltip == GameTooltip or tooltip == ItemRefTooltip then
-        AddTooltipLine(tooltip, data and data.id)
-      end
-    end)
-  else
-    for _, tt in ipairs({ GameTooltip, ItemRefTooltip }) do
-      tt:HookScript("OnTooltipSetItem", function(self)
-        local _, link = self:GetItem()
-        AddTooltipLine(self, ItemIDFromLink(link))
-      end)
+-------------------------------------------------------------------------------
+-- Upgrade from 1.0.0, which stored favorites per item ID: mark the matching
+-- items currently in the bags, then drop the old list.
+-------------------------------------------------------------------------------
+
+local function MigrateItemIDFavorites()
+  if not db.items then
+    return
+  end
+  for _, item in ipairs(ScanBags()) do
+    if db.items[item.id] then
+      db.guids[item.guid] = { id = item.id, link = item.link }
     end
   end
-  for _, tt in ipairs({ GameTooltip, ItemRefTooltip }) do
-    tt:HookScript("OnTooltipCleared", function(self) self.FavoriteItemsLineAdded = nil end)
-  end
+  db.items = nil
+  RefreshAllHearts()
 end
 
 -------------------------------------------------------------------------------
@@ -679,9 +817,9 @@ SlashCmdList.FAVORITEITEMS = function(msg)
   msg = strtrim((msg or ""):lower())
   if msg == "list" then
     local n = 0
-    for id, link in pairs(db.items) do
+    for guid, info in pairs(db.guids) do
       n = n + 1
-      Print(HEART_INLINE .. " " .. (type(link) == "string" and link or ("item " .. id)))
+      Print(HEART_INLINE .. " " .. (info.link or ("item " .. tostring(info.id))))
     end
     if n == 0 then
       Print("No favorites yet.")
@@ -721,10 +859,12 @@ events:RegisterEvent("PLAYERBANKSLOTS_CHANGED")
 events:SetScript("OnEvent", function(_, event, arg1)
   if event == "ADDON_LOADED" and arg1 == ADDON_NAME then
     FavoriteItemsDB = FavoriteItemsDB or {}
-    FavoriteItemsDB.items = FavoriteItemsDB.items or {}
+    FavoriteItemsDB.guids = FavoriteItemsDB.guids or {}
     db = FavoriteItemsDB
   elseif event == "PLAYER_LOGIN" then
     HookTooltips()
+    -- Bag contents aren't always ready right at login.
+    C_Timer.After(3, MigrateItemIDFavorites)
     if useBaganator then
       FindBaganatorViews()
       -- Baganator may build some views late; look again shortly after login.
@@ -743,17 +883,17 @@ events:SetScript("OnEvent", function(_, event, arg1)
     ExitMarkMode()
   elseif event == "MERCHANT_SHOW" then
     merchantOpen = true
-    buybackSnapshot = SnapshotBuyback()
+    StartSaleTracking()
   elseif event == "MERCHANT_CLOSED" then
     merchantOpen = false
-    buybackSnapshot = nil
+    sale = nil
     if warning and warning:IsShown() then
       UpdateWarning()
     end
   elseif event == "MERCHANT_UPDATE" then
-    CheckBuyback()
+    CheckSales()
   elseif event == "BAG_UPDATE_DELAYED" then
-    CheckBuyback()
+    CheckSales()
     -- Baganator refreshes its own corner widgets when items move.
     if not useBaganator then
       RefreshAllHearts()

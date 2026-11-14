@@ -2,7 +2,7 @@
 ## Title: FavoriteItems
 ## Notes: Mark items as favorites with a heart, and get warned when you sell one.
 ## Author: Lundqwist
-## Version: 1.0.0
+## Version: 1.1.0
 ## OptionalDeps: Baganator
 ## SavedVariables: FavoriteItemsDB
 ## IconTexture: Interface\AddOns\FavoriteItems\Media\Heart
