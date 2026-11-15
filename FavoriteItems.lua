@@ -159,20 +159,27 @@ local function FindBaganatorViews()
   end
 end
 
+-- Default bag and bank frames. On Forever the modern ones (the combined
+-- backpack, ContainerFrameContainer's frames) can be created late, so this is
+-- asked again each time.
 local function BlizzardContainers()
-  local list = {}
-  for i = 1, (NUM_CONTAINER_FRAMES or 13) do
-    local f = _G["ContainerFrame" .. i]
-    if f then
+  local list, seen = {}, {}
+  local function add(f)
+    if f and not seen[f] then
+      seen[f] = true
       table.insert(list, f)
     end
   end
-  if ContainerFrameCombinedBags then
-    table.insert(list, ContainerFrameCombinedBags)
+  add(ContainerFrameCombinedBags)
+  if ContainerFrameContainer and ContainerFrameContainer.ContainerFrames then
+    for _, f in ipairs(ContainerFrameContainer.ContainerFrames) do
+      add(f)
+    end
   end
-  if BankFrame then
-    table.insert(list, BankFrame)
+  for i = 1, (NUM_CONTAINER_FRAMES or 13) do
+    add(_G["ContainerFrame" .. i])
   end
+  add(BankFrame)
   return list
 end
 
@@ -226,6 +233,21 @@ local function CollectBaganatorButtons(frame, out)
 end
 
 local function CollectBlizzardButtons(frame, out)
+  -- Modern bag frames list their own item buttons. The combined backpack
+  -- returns (index, button); other frames may return just the button.
+  if frame.EnumerateValidItems then
+    local ok = pcall(function()
+      for first, second in frame:EnumerateValidItems() do
+        local button = second or first
+        if type(button) == "table" and button.IsVisible and button:IsVisible() then
+          table.insert(out, button)
+        end
+      end
+    end)
+    if ok then
+      return
+    end
+  end
   for _, child in ipairs({ frame:GetChildren() }) do
     if child:IsVisible() then
       local objectType = child:GetObjectType()
@@ -291,6 +313,8 @@ local function UpdateBlizzardHearts()
       button.FavoriteItemsHeart = holder
     end
     if button.FavoriteItemsHeart then
+      -- Pooled buttons can change frame level; keep the heart above them.
+      button.FavoriteItemsHeart:SetFrameLevel(button:GetFrameLevel() + 5)
       button.FavoriteItemsHeart:SetShown(fav)
     end
   end
@@ -302,10 +326,46 @@ function RefreshAllHearts()
     Baganator.API.RequestItemButtonsRefresh()
   elseif not heartsQueued then
     heartsQueued = true
-    C_Timer.After(0, function()
+    -- A short delay: the default bags fill in their buttons after OnShow.
+    C_Timer.After(0.02, function()
       heartsQueued = false
       UpdateBlizzardHearts()
     end)
+  end
+end
+
+-- Default bags: redraw the hearts whenever a bag frame shows or updates.
+-- Forever doesn't always run UpdateItems after a bag opens, so OnShow and the
+-- bag-open functions are hooked too, with a second, later redraw.
+local hookedFrames = {}
+local hookedFunctions = {}
+
+local function RefreshSoonAndLater()
+  RefreshAllHearts()
+  C_Timer.After(0.25, RefreshAllHearts)
+end
+
+local function InstallBlizzardHooks()
+  for _, f in ipairs(BlizzardContainers()) do
+    if not hookedFrames[f] then
+      hookedFrames[f] = true
+      f:HookScript("OnShow", RefreshSoonAndLater)
+      f:HookScript("OnHide", OnContainerHidden)
+      if type(f.UpdateItems) == "function" then
+        hooksecurefunc(f, "UpdateItems", RefreshAllHearts)
+      end
+    end
+  end
+  for _, name in ipairs({ "ContainerFrame_Update", "OpenAllBags", "ToggleAllBags", "OpenBackpack", "ToggleBackpack", "OpenBag", "ToggleBag" }) do
+    if not hookedFunctions[name] and type(_G[name]) == "function" then
+      hookedFunctions[name] = true
+      hooksecurefunc(name, function()
+        C_Timer.After(0, function()
+          InstallBlizzardHooks() -- frames created on first open
+          RefreshSoonAndLater()
+        end)
+      end)
+    end
   end
 end
 
@@ -824,9 +884,25 @@ SlashCmdList.FAVORITEITEMS = function(msg)
     if n == 0 then
       Print("No favorites yet.")
     end
+  elseif msg == "debug" then
+    local favorites = 0
+    for _ in pairs(db.guids) do
+      favorites = favorites + 1
+    end
+    local buttons, withItem, withGUID, hearts = 0, 0, 0, 0
+    for _, button in ipairs(CollectItemButtons()) do
+      buttons = buttons + 1
+      local itemID, _, guid = GetButtonItem(button)
+      if itemID then withItem = withItem + 1 end
+      if guid then withGUID = withGUID + 1 end
+      if IsFavorite(guid) then hearts = hearts + 1 end
+    end
+    Print(("Mode: %s. Open windows: %d. Item buttons: %d (%d with an item, %d with a GUID). Favorites saved: %d, shown here: %d.")
+      :format(useBaganator and "Baganator" or "default bags", #VisibleContainers(), buttons, withItem, withGUID, favorites, hearts))
   elseif msg == "help" then
     Print("/fav - start or stop marking favorites (opens your bags)")
     Print("/fav list - list all favorites")
+    Print("/fav debug - what the addon finds in the open bag windows")
   else
     if markMode then
       ExitMarkMode()
@@ -871,13 +947,7 @@ events:SetScript("OnEvent", function(_, event, arg1)
       C_Timer.After(2, FindBaganatorViews)
     else
       CreateBlizzardToggles()
-      for _, f in ipairs(BlizzardContainers()) do
-        f:HookScript("OnShow", RefreshAllHearts)
-        f:HookScript("OnHide", OnContainerHidden)
-      end
-      if ContainerFrame_Update then
-        hooksecurefunc("ContainerFrame_Update", RefreshAllHearts)
-      end
+      InstallBlizzardHooks()
     end
   elseif event == "PLAYER_REGEN_DISABLED" then
     ExitMarkMode()
