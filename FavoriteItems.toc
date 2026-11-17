@@ -2,7 +2,7 @@
 ## Title: FavoriteItems
 ## Notes: Mark items with a heart and get warned, with a buy-back button, when you sell one. /fav
 ## Author: Lundqwist
-## Version: 1.2.0
+## Version: 1.2.1
 ## OptionalDeps: Baganator
 ## SavedVariables: FavoriteItemsDB
 ## IconTexture: Interface\AddOns\FavoriteItems\Media\Heart
