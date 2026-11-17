@@ -4,6 +4,8 @@
 
 A World of Warcraft: Forever addon (interface 16001). Works on its own, or together with [LunarMods](https://github.com/Lundqwist/LunarMods).
 
+[![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/lundqwist)
+
 ![FavoriteItems with Baganator: hearts on favorite items and the Favorites button in the bottom row](screenshots/baganator.png)
 
 *With Baganator: favorites get a heart, and the **Favorites** button sits in the bag window's bottom row.*
