@@ -8,8 +8,12 @@
 --
 -- Works with Baganator (uses its corner-widget and region API) and falls back
 -- to the default Blizzard bag and bank frames when Baganator isn't loaded.
+--
+-- It has its own minimap button and options page (LunarLink.lua). With
+-- LunarMods installed, the options page can link it to LunarMods: then the
+-- LM minimap button runs it and its own button is hidden.
 
-local ADDON_NAME = ...
+local ADDON_NAME, ns = ...
 
 local HEART = "Interface\\AddOns\\FavoriteItems\\Media\\Heart"
 local HEART_INLINE = "|T" .. HEART .. ":14:14|t"
@@ -868,22 +872,92 @@ local function MigrateItemIDFavorites()
 end
 
 -------------------------------------------------------------------------------
+-- Minimap button, options page and LunarMods link (LunarLink.lua)
+-------------------------------------------------------------------------------
+
+local function CountFavorites()
+  local n = 0
+  if db then
+    for _ in pairs(db.guids) do
+      n = n + 1
+    end
+  end
+  return n
+end
+
+local function ListFavorites()
+  local n = 0
+  for _, info in pairs(db.guids) do
+    n = n + 1
+    Print(HEART_INLINE .. " " .. (info.link or ("item " .. tostring(info.id))))
+  end
+  if n == 0 then
+    Print("No favorites yet.")
+  end
+end
+
+-- Start or stop marking; opens the bags first when they are closed
+local function StartOrStopMarking()
+  if markMode then
+    ExitMarkMode()
+  elseif #VisibleContainers() == 0 then
+    OpenAllBags()
+    C_Timer.After(0.1, EnterMarkMode)
+  else
+    EnterMarkMode()
+  end
+end
+
+local link = ns.NewLunarLink({
+  name = ADDON_NAME,
+  title = "FavoriteItems",
+  icon = HEART,
+  angle = 190,
+  db = function() return FavoriteItemsDB end,
+  open = StartOrStopMarking,
+  hint = "Left-click: start or stop marking favorites",
+  tooltip = function(tt)
+    tt:AddDoubleLine("Favorites", CountFavorites(), 1, 1, 1, 1, 0.44, 0.66)
+    if markMode then
+      tt:AddLine("Marking: click items in your bags.", 0.2, 1, 0.3)
+    end
+  end,
+  options = function(l)
+    l:AddHeader("Favorites")
+    l:AddText(function()
+      return ("You have %s%d|r favorite items. Click a bag item while marking to add or remove one."):format(COLOR, CountFavorites())
+    end, "GameFontHighlight")
+    local mark = l:AddButton("Mark favorites", 150, function()
+      if SettingsPanel and SettingsPanel:IsShown() and HideUIPanel then
+        HideUIPanel(SettingsPanel)
+      end
+      StartOrStopMarking()
+    end)
+    l:AddButton("List them in chat", 150, ListFavorites, mark)
+  end,
+  help = {
+    "/fav - start or stop marking favorites (opens your bags)",
+    "/fav list - list all favorites in chat",
+    "/fav options - this page",
+    "/fav debug - what the addon finds in the open bag windows",
+  },
+})
+
+-------------------------------------------------------------------------------
 -- Slash command
 -------------------------------------------------------------------------------
 
 SLASH_FAVORITEITEMS1 = "/fav"
 SLASH_FAVORITEITEMS2 = "/favorites"
 SlashCmdList.FAVORITEITEMS = function(msg)
+  if not db then
+    return
+  end
   msg = strtrim((msg or ""):lower())
   if msg == "list" then
-    local n = 0
-    for guid, info in pairs(db.guids) do
-      n = n + 1
-      Print(HEART_INLINE .. " " .. (info.link or ("item " .. tostring(info.id))))
-    end
-    if n == 0 then
-      Print("No favorites yet.")
-    end
+    ListFavorites()
+  elseif msg == "options" or msg == "config" then
+    link:OpenOptions()
   elseif msg == "debug" then
     local favorites = 0
     for _ in pairs(db.guids) do
@@ -902,18 +976,10 @@ SlashCmdList.FAVORITEITEMS = function(msg)
   elseif msg == "help" then
     Print("/fav - start or stop marking favorites (opens your bags)")
     Print("/fav list - list all favorites")
+    Print("/fav options - minimap button and LunarMods link")
     Print("/fav debug - what the addon finds in the open bag windows")
   else
-    if markMode then
-      ExitMarkMode()
-    else
-      if #VisibleContainers() == 0 then
-        OpenAllBags()
-        C_Timer.After(0.1, EnterMarkMode)
-      else
-        EnterMarkMode()
-      end
-    end
+    StartOrStopMarking()
   end
 end
 
@@ -938,6 +1004,7 @@ events:SetScript("OnEvent", function(_, event, arg1)
     FavoriteItemsDB.guids = FavoriteItemsDB.guids or {}
     db = FavoriteItemsDB
   elseif event == "PLAYER_LOGIN" then
+    link:Init()
     HookTooltips()
     -- Bag contents aren't always ready right at login.
     C_Timer.After(3, MigrateItemIDFavorites)
