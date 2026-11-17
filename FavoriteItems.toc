@@ -3,11 +3,9 @@
 ## Notes: Mark items with a heart and get warned, with a buy-back button, when you sell one. /fav
 ## Author: Lundqwist
 ## Version: 1.2.0
-## OptionalDeps: Baganator, LunarMods
+## OptionalDeps: Baganator
 ## SavedVariables: FavoriteItemsDB
 ## IconTexture: Interface\AddOns\FavoriteItems\Media\Heart
-## X-LunarMods: 1
-## X-LunarMods-Open: /fav
 
 LunarLink.lua
 FavoriteItems.lua

@@ -9,9 +9,7 @@
 -- Works with Baganator (uses its corner-widget and region API) and falls back
 -- to the default Blizzard bag and bank frames when Baganator isn't loaded.
 --
--- It has its own minimap button and options page (LunarLink.lua). With
--- LunarMods installed, the options page can link it to LunarMods: then the
--- LM minimap button runs it and its own button is hidden.
+-- It has its own minimap button and options page (LunarLink.lua).
 
 local ADDON_NAME, ns = ...
 
@@ -872,7 +870,7 @@ local function MigrateItemIDFavorites()
 end
 
 -------------------------------------------------------------------------------
--- Minimap button, options page and LunarMods link (LunarLink.lua)
+-- Minimap button and options page (LunarLink.lua)
 -------------------------------------------------------------------------------
 
 local function CountFavorites()
@@ -976,7 +974,7 @@ SlashCmdList.FAVORITEITEMS = function(msg)
   elseif msg == "help" then
     Print("/fav - start or stop marking favorites (opens your bags)")
     Print("/fav list - list all favorites")
-    Print("/fav options - minimap button and LunarMods link")
+    Print("/fav options - minimap button and options")
     Print("/fav debug - what the addon finds in the open bag windows")
   else
     StartOrStopMarking()

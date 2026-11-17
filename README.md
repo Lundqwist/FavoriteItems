@@ -2,7 +2,7 @@
 
 **Mark items with a heart and get warned, with a buy-back button, when you sell one.**
 
-A World of Warcraft: Forever addon (interface 16001). Works on its own, or together with [LunarMods](https://github.com/Lundqwist/LunarMods).
+A World of Warcraft: Forever addon (interface 16001).
 
 [![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/lundqwist)
 
@@ -26,15 +26,14 @@ Favorites are specific items, not item types: each is saved by its item GUID in 
 
 Works with Baganator (the heart is a Baganator corner widget: it can be moved under Baganator's settings → Icons) and falls back to the default Blizzard bags and bank when Baganator isn't enabled.
 
-## Options and LunarMods
+## Options
 
 Right-click the minimap button, type `/fav options`, or open Options → AddOns → FavoriteItems.
 
-![FavoriteItems options: minimap button, favorites and the Link to LunarMods button](screenshots/options.png)
+![FavoriteItems options: minimap button and favorites](screenshots/options.png)
 
 - **Show the minimap button**
 - **Mark favorites**, **List them in chat**
-- **Link to LunarMods**: with LunarMods installed, this hides FavoriteItems' own minimap button and lets LunarMods' **LM** button run it instead (its right-click menu opens it, its tooltip shows the favorites count). **Unlink from LunarMods** gives the heart button back. LunarMods' `/lm` list switches FavoriteItems on and off whether it's linked or not. Without LunarMods the link button is greyed out and FavoriteItems works on its own.
 
 ## Commands
 
@@ -51,7 +50,7 @@ Copy the `FavoriteItems` folder (with `FavoriteItems.toc`, `LunarLink.lua`, `Fav
 
 ## For developers
 
-`LunarLink.lua` (minimap button, options page, LunarMods link) is a copy of `shared\LunarLink.lua` in the [LunarMods](https://github.com/Lundqwist/LunarMods) repository; change it there and copy it over with `tools\sync-link.ps1`. The description for CurseForge is in [CURSEFORGE.md](CURSEFORGE.md).
+`LunarLink.lua` (minimap button and options page) is the same file in each of my mods (FavoriteItems, QuestXPTracker, LunarJournal); keep the copies alike. The description for CurseForge is in [CURSEFORGE.md](CURSEFORGE.md).
 
 ## License
 

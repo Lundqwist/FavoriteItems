@@ -34,7 +34,6 @@ Right-click the minimap button, type `/fav options`, or open the game's Options 
 
 - **Show the minimap button**: switch the heart button off if you'd rather use `/fav`.
 - **Mark favorites** and **List them in chat**.
-- **Link to LunarMods**: with [LunarMods](https://github.com/Lundqwist/LunarMods) installed, FavoriteItems can hand its minimap button over to LunarMods' **LM** button, which then opens it from its menu and shows your favorites count in its tooltip. **Unlink** gives the heart button back. LunarMods also switches the mod on and off in its `/lm` list. Without LunarMods, FavoriteItems works on its own.
 
 ## Commands
 
