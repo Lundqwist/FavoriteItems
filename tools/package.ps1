@@ -1,6 +1,7 @@
 # Builds the CurseForge upload folder:
 #   curseforge\FavoriteItems-<version>.zip   the file to upload (contains FavoriteItems\...)
 #   curseforge\description.md                paste into the project description (Markdown editor)
+#   curseforge\changelog.md                  paste into the upload's Changelog box (Markdown): this version's CHANGELOG.md section
 #   curseforge\avatar.png                    400x400 project avatar (the heart, from make-avatar.ps1)
 #   curseforge\screenshots\                  in-game screenshots for the project's Images tab
 # Usage (from the repo root): .\tools\package.ps1
@@ -47,6 +48,20 @@ try {
 }
 
 Copy-Item (Join-Path $root "CURSEFORGE.md") (Join-Path $out "description.md") -Force
+
+# This version's section of CHANGELOG.md, for the file upload's Changelog box
+$changes = Get-Content (Join-Path $root "CHANGELOG.md") -Encoding UTF8
+$start = -1; $end = $changes.Count
+for ($i = 0; $i -lt $changes.Count; $i++) {
+    if ($changes[$i] -match '^## (\S+)') {
+        if ($start -ge 0) { $end = $i; break }
+        if ($Matches[1] -eq $version) { $start = $i }
+    }
+}
+if ($start -lt 0) { throw "No '## $version' section in CHANGELOG.md" }
+$section = $changes[$start..($end - 1)] -join "`n"
+$section = $section.Trim() + "`n`nFull history: https://github.com/Lundqwist/FavoriteItems/blob/main/CHANGELOG.md`n"
+[System.IO.File]::WriteAllText((Join-Path $out "changelog.md"), $section, (New-Object System.Text.UTF8Encoding $false))
 & (Join-Path $PSScriptRoot "make-avatar.ps1") -Size 400 -Png (Join-Path $out "avatar.png") | Out-Null
 
 $shots = Get-ChildItem (Join-Path $root "screenshots") -Filter *.png -ErrorAction SilentlyContinue

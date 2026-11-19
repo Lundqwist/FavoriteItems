@@ -5,7 +5,7 @@
 - **Disenchant warning**: starting to disenchant a favorite gives a raid warning, a sound and a pop-up while the cast is still going, with a **Stop casting** button (moving or Esc works too). If the cast finishes, the item is dropped from your favorites; if it's stopped, you get a "Phew" message.
 - While you're choosing what to disenchant, a favorite's tooltip says "Don't disenchant this one!"
 - **Mail warning**: attaching a favorite to a letter gives a warning and turns the **Send** button off until you pick **Remove it** or **Send anyway**. Letters sent by mass-mail addons skip the button; you get a chat message afterwards.
-- The warning pop-ups share one look (the sold warning is unchanged).
+- Note: addons can't block a spell, so the disenchant warning comes during the cast. An instant disenchant from another addon only gets a message afterwards.
 
 ## 1.2.1 (2026-11-17)
 
