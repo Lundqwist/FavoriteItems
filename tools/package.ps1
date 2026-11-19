@@ -21,6 +21,7 @@ $files = @(
     "$name.lua",
     "LICENSE",
     "README.md",
+    "CHANGELOG.md",
     "Media\Heart.tga"
 )
 foreach ($f in $files) {

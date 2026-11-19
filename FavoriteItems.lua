@@ -1,6 +1,7 @@
 -- FavoriteItems
 -- Mark specific items as favorites (a small heart in the icon's upper left
--- corner) and get a warning when a favorite item is sold to a merchant.
+-- corner) and get a warning when a favorite item is sold to a merchant, while
+-- one is being disenchanted, or when one is attached to a letter.
 --
 -- Favorites are individual items, not item types: each one is stored by its
 -- item GUID, so marking one Linen Cloth or one copy of a sword leaves the
@@ -557,7 +558,7 @@ local function MakeToggle(parent)
     GameTooltip:SetOwner(self, "ANCHOR_TOP")
     GameTooltip:SetText("Favorite items")
     GameTooltip:AddLine("Click, then click items to mark or unmark them as favorites.", 1, 1, 1, true)
-    GameTooltip:AddLine("You'll be warned if you sell a favorite.", 1, 1, 1, true)
+    GameTooltip:AddLine("You'll be warned if you sell, disenchant or mail a favorite.", 1, 1, 1, true)
     GameTooltip:Show()
   end)
   b:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -626,8 +627,17 @@ local function BuybackNext()
   end
 end
 
-local function CreateWarning()
-  local f = CreateFrame("Frame", "FavoriteItemsSoldWarning", UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
+-- A raid-warning message and sound, shared by all warnings.
+local function Alarm(text)
+  if RaidNotice_AddMessage and RaidWarningFrame and ChatTypeInfo and ChatTypeInfo["RAID_WARNING"] then
+    RaidNotice_AddMessage(RaidWarningFrame, HEART_INLINE .. " " .. text, ChatTypeInfo["RAID_WARNING"])
+  end
+  PlaySound(SOUNDKIT and SOUNDKIT.RAID_WARNING or 8959, "Master")
+end
+
+-- A movable dialog box with a title, a body (item list) and a hint line.
+local function MakeDialog(name, title)
+  local f = CreateFrame("Frame", name, UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
   f:SetSize(380, 160)
   f:SetPoint("TOP", UIParent, "TOP", 0, -150)
   f:SetFrameStrata("DIALOG")
@@ -649,7 +659,7 @@ local function CreateWarning()
 
   f.title = f:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
   f.title:SetPoint("TOP", 0, -20)
-  f.title:SetText(HEART_INLINE .. "  You sold a favorite item!  " .. HEART_INLINE)
+  f.title:SetText(HEART_INLINE .. "  " .. title .. "  " .. HEART_INLINE)
 
   f.body = f:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
   f.body:SetPoint("TOP", f.title, "BOTTOM", 0, -12)
@@ -660,6 +670,28 @@ local function CreateWarning()
   f.hint:SetPoint("TOP", f.body, "BOTTOM", 0, -8)
   f.hint:SetWidth(330)
 
+  f.Fit = function(self)
+    self:SetHeight(110 + self.body:GetStringHeight() + self.hint:GetStringHeight())
+  end
+  f:Hide()
+  return f
+end
+
+-- "link" or "link x3" lines for a list of { id, link, count }
+local function ItemLines(list)
+  local lines = {}
+  for _, entry in ipairs(list) do
+    local name = entry.link or ("item " .. tostring(entry.id))
+    if (entry.count or 1) > 1 then
+      name = name .. " x" .. entry.count
+    end
+    table.insert(lines, name)
+  end
+  return table.concat(lines, "\n")
+end
+
+local function CreateWarning()
+  local f = MakeDialog("FavoriteItemsSoldWarning", "You sold a favorite item!")
   f.buyback = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
   f.buyback:SetSize(120, 24)
   f.buyback:SetPoint("BOTTOMRIGHT", f, "BOTTOM", -6, 18)
@@ -683,21 +715,12 @@ local function CreateWarning()
 
   f:SetScript("OnHide", function() wipe(pendingSold) end)
   table.insert(UISpecialFrames, "FavoriteItemsSoldWarning")
-  f:Hide()
   return f
 end
 
 local function UpdateWarning()
   warning = warning or CreateWarning()
-  local lines = {}
-  for _, entry in ipairs(pendingSold) do
-    local name = entry.link or ("item " .. entry.id)
-    if entry.count > 1 then
-      name = name .. " x" .. entry.count
-    end
-    table.insert(lines, name)
-  end
-  warning.body:SetText(table.concat(lines, "\n"))
+  warning.body:SetText(ItemLines(pendingSold))
   if merchantOpen then
     warning.buyback:Enable()
     warning.hint:SetText("You can still buy it back from this merchant's Buyback tab.")
@@ -705,17 +728,14 @@ local function UpdateWarning()
     warning.buyback:Disable()
     warning.hint:SetText("The merchant window is closed, so it can't be bought back here.")
   end
-  warning:SetHeight(110 + warning.body:GetStringHeight() + warning.hint:GetStringHeight())
+  warning:Fit()
   warning:Show()
 end
 
 local function WarnSold(itemID, link)
   local name = link or ("item " .. itemID)
   Print("|cffff4040Warning:|r you sold your favorite item " .. name .. "!")
-  if RaidNotice_AddMessage and RaidWarningFrame and ChatTypeInfo and ChatTypeInfo["RAID_WARNING"] then
-    RaidNotice_AddMessage(RaidWarningFrame, HEART_INLINE .. " Favorite item sold: " .. name, ChatTypeInfo["RAID_WARNING"])
-  end
-  PlaySound(SOUNDKIT and SOUNDKIT.RAID_WARNING or 8959, "Master")
+  Alarm("Favorite item sold: " .. name)
 
   for _, entry in ipairs(pendingSold) do
     if entry.id == itemID then
@@ -837,6 +857,374 @@ local function CheckSales()
 end
 
 -------------------------------------------------------------------------------
+-- Locked favorites
+--
+-- The game locks (greys out) a bag item while a spell such as Disenchant is
+-- being cast on it, and while it's attached to a letter that hasn't been sent.
+-- Both warnings below look for favorites that are locked at those moments,
+-- which catches every way of doing it (clicks, drags, other addons).
+-------------------------------------------------------------------------------
+
+local function IsSlotLocked(bag, slot)
+  if C_Container and C_Container.GetContainerItemInfo then
+    local info = C_Container.GetContainerItemInfo(bag, slot)
+    return info ~= nil and info.isLocked
+  elseif GetContainerItemInfo then
+    return (select(3, GetContainerItemInfo(bag, slot))) and true or false
+  end
+  return false
+end
+
+-- Favorites in the bags that are locked right now: list of { guid, id, link }
+local function LockedFavorites()
+  local list = {}
+  if not db then
+    return list
+  end
+  for bag = 0, (NUM_BAG_SLOTS or 4) do
+    for slot = 1, NumBagSlots(bag) do
+      if IsSlotLocked(bag, slot) then
+        local itemID, link, guid = GetBagSlotItem(bag, slot)
+        if IsFavorite(guid) then
+          table.insert(list, { guid = guid, id = itemID, link = link or db.guids[guid].link })
+        end
+      end
+    end
+  end
+  return list
+end
+
+local function InBags(guid)
+  for _, item in ipairs(ScanBags()) do
+    if item.guid == guid then
+      return true
+    end
+  end
+  return false
+end
+
+-------------------------------------------------------------------------------
+-- Disenchant warning
+--
+-- Addons can't stop a cast, so this warns while Disenchant is being cast on a
+-- favorite: there's time to move, press Esc or click "Stop casting" (a secure
+-- button that runs /stopcasting).
+-------------------------------------------------------------------------------
+
+local DISENCHANT = 13262
+
+local function SpellName(spellID)
+  if C_Spell and C_Spell.GetSpellName then
+    return C_Spell.GetSpellName(spellID)
+  elseif GetSpellInfo then
+    return (GetSpellInfo(spellID))
+  end
+end
+
+local function IsDisenchant(spellID)
+  if spellID == DISENCHANT then
+    return true
+  end
+  local name = SpellName(DISENCHANT)
+  return spellID ~= nil and name ~= nil and SpellName(spellID) == name
+end
+
+-- True while the cursor is waiting for an item to disenchant.
+local function IsDisenchantTargeting()
+  if not (SpellIsTargeting and SpellIsTargeting()) then
+    return false
+  end
+  local ok, current
+  if C_Spell and C_Spell.IsCurrentSpell then
+    ok, current = pcall(C_Spell.IsCurrentSpell, DISENCHANT)
+  elseif IsCurrentSpell then
+    ok, current = pcall(IsCurrentSpell, DISENCHANT)
+  end
+  return ok and current and true or false
+end
+
+local disenchant = nil  -- { items = { guid -> info }, done = bool } while casting
+local dePopup
+
+local function CreateDisenchantPopup()
+  local f = MakeDialog("FavoriteItemsDisenchantWarning", "Disenchanting a favorite!")
+  f.hint:SetText("Move, press Esc or click Stop casting to keep it.")
+
+  -- Secure, so it may stop the cast. Created out of combat at login.
+  f.stop = CreateFrame("Button", nil, f, "SecureActionButtonTemplate,UIPanelButtonTemplate")
+  f.stop:SetSize(120, 24)
+  f.stop:SetPoint("BOTTOMRIGHT", f, "BOTTOM", -6, 18)
+  f.stop:SetText("Stop casting")
+  f.stop:RegisterForClicks("LeftButtonUp", "LeftButtonDown")
+  f.stop:SetAttribute("type", "macro")
+  f.stop:SetAttribute("macrotext", "/stopcasting")
+
+  f.ok = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+  f.ok:SetSize(120, 24)
+  f.ok:SetPoint("BOTTOMLEFT", f, "BOTTOM", 6, 18)
+  f.ok:SetText("Let it go")
+  f.ok:SetScript("OnClick", function() f:Hide() end)
+  -- Not in UISpecialFrames: Esc should stop the cast, not just close this.
+  return f
+end
+
+local function ShowDisenchantPopup()
+  -- A frame with a secure button can't be shown in combat; chat and the raid
+  -- warning still go out.
+  if not dePopup or InCombatLockdown() or not disenchant then
+    return
+  end
+  local list = {}
+  for _, info in pairs(disenchant.items) do
+    table.insert(list, info)
+  end
+  dePopup.body:SetText(ItemLines(list))
+  dePopup:Fit()
+  dePopup:Show()
+end
+
+local function HideDisenchantPopup()
+  if dePopup and dePopup:IsShown() and not InCombatLockdown() then
+    dePopup:Hide()
+  end
+end
+
+local function CheckDisenchant()
+  if not disenchant or disenchant.done then
+    return
+  end
+  local found = false
+  for _, info in ipairs(LockedFavorites()) do
+    if not disenchant.items[info.guid] then
+      disenchant.items[info.guid] = info
+      found = true
+      local name = info.link or ("item " .. tostring(info.id))
+      Print("|cffff4040Warning:|r you're disenchanting your favorite item " .. name .. "! Move or press Esc to stop.")
+      Alarm("Disenchanting a favorite: " .. name)
+    end
+  end
+  if found then
+    ShowDisenchantPopup()
+  end
+end
+
+local function StartDisenchant(castGUID)
+  disenchant = { items = {}, done = false, cast = castGUID }
+  CheckDisenchant()
+  -- The lock can arrive just after the cast starts.
+  C_Timer.After(0.1, CheckDisenchant)
+end
+
+local function EndDisenchant()
+  if not disenchant or disenchant.done then
+    return
+  end
+  disenchant.done = true
+  HideDisenchantPopup()
+  local items = disenchant.items
+  -- Give the game a moment to remove the item (and hand out the loot).
+  C_Timer.After(1, function()
+    for guid, info in pairs(items) do
+      local name = info.link or ("item " .. tostring(info.id))
+      if InBags(guid) then
+        Print(HEART_INLINE .. " Phew, " .. name .. " wasn't disenchanted.")
+      else
+        db.guids[guid] = nil
+        Print(name .. " was disenchanted. It's gone from your favorites.")
+      end
+    end
+    RefreshAllHearts()
+  end)
+end
+
+-------------------------------------------------------------------------------
+-- Mail warning
+--
+-- An item attached to a letter stays in the bags, locked, until the letter is
+-- sent. When a favorite is attached, a warning pops up and the Send button is
+-- disabled until you pick "Remove it" or "Send anyway". Addons that send mail
+-- by themselves (mass mailers) skip the Send button; you're told afterwards.
+-------------------------------------------------------------------------------
+
+local mailOpen = false
+local mail = { attached = {}, allowed = {}, sending = nil }
+local mailPopup
+local sendHooksInstalled = false
+
+local function AttachedItemCounts()
+  local counts, max = {}, ATTACHMENTS_MAX_SEND or 12
+  if not GetSendMailItemLink then
+    return counts
+  end
+  for i = 1, max do
+    local id = ItemIDFromLink(GetSendMailItemLink(i))
+    if id then
+      counts[id] = (counts[id] or 0) + 1
+    end
+  end
+  return counts
+end
+
+-- Attached favorites the user hasn't said yes to yet
+local function UnapprovedAttachments()
+  local list = {}
+  for guid, info in pairs(mail.attached) do
+    if not mail.allowed[guid] then
+      table.insert(list, info)
+    end
+  end
+  return list
+end
+
+local function ApplySendBlock()
+  if mailOpen and SendMailMailButton and #UnapprovedAttachments() > 0 then
+    SendMailMailButton:Disable()
+  end
+end
+
+-- Let Blizzard decide again whether Send should be enabled.
+local function RestoreSendButton()
+  if type(SendMailFrame_CanSend) == "function" then
+    SendMailFrame_CanSend()
+  elseif type(SendMailFrame_Update) == "function" then
+    SendMailFrame_Update()
+  end
+end
+
+local function InstallSendHooks()
+  if sendHooksInstalled then
+    return
+  end
+  sendHooksInstalled = true
+  for _, name in ipairs({ "SendMailFrame_Update", "SendMailFrame_CanSend" }) do
+    if type(_G[name]) == "function" then
+      hooksecurefunc(name, ApplySendBlock)
+    end
+  end
+  if type(SendMail) == "function" then
+    hooksecurefunc("SendMail", function()
+      -- Remember what went out with this letter, for the note afterwards.
+      local list = {}
+      for _, info in pairs(mail.attached) do
+        table.insert(list, info)
+      end
+      mail.sending = list
+      if mailPopup then
+        mailPopup:Hide()
+      end
+    end)
+  end
+end
+
+local function CreateMailPopup()
+  local f = MakeDialog("FavoriteItemsMailWarning", "A favorite is in your letter!")
+  f.hint:SetText("Send is off until you choose.")
+
+  f.remove = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+  f.remove:SetSize(120, 24)
+  f.remove:SetPoint("BOTTOMRIGHT", f, "BOTTOM", -6, 18)
+  f.remove:SetText("Remove it")
+  f.remove:SetScript("OnClick", function()
+    local need = {}
+    for _, info in ipairs(UnapprovedAttachments()) do
+      need[info.id] = (need[info.id] or 0) + 1
+    end
+    -- Back to front, so clearing one doesn't move the ones still to check.
+    for i = (ATTACHMENTS_MAX_SEND or 12), 1, -1 do
+      local id = ItemIDFromLink(GetSendMailItemLink(i))
+      if id and (need[id] or 0) > 0 then
+        need[id] = need[id] - 1
+        ClickSendMailItemButton(i, true)
+      end
+    end
+    f:Hide()
+  end)
+
+  f.send = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+  f.send:SetSize(120, 24)
+  f.send:SetPoint("BOTTOMLEFT", f, "BOTTOM", 6, 18)
+  f.send:SetText("Send anyway")
+  f.send:SetScript("OnClick", function()
+    for guid in pairs(mail.attached) do
+      mail.allowed[guid] = true
+    end
+    f:Hide()
+    RestoreSendButton()
+  end)
+  return f
+end
+
+local function CheckMail()
+  if not mailOpen or not db then
+    return
+  end
+  -- An item on the cursor is locked too; wait until it's put down.
+  if CursorHasItem and CursorHasItem() then
+    return
+  end
+
+  -- Locked favorites whose item ID is among the attachments are attached.
+  local counts = AttachedItemCounts()
+  local attached, new = {}, {}
+  for _, info in ipairs(LockedFavorites()) do
+    if (counts[info.id] or 0) > 0 then
+      counts[info.id] = counts[info.id] - 1
+      attached[info.guid] = info
+      if not mail.attached[info.guid] and not mail.allowed[info.guid] then
+        table.insert(new, info)
+      end
+    end
+  end
+  local wasBlocked = #UnapprovedAttachments() > 0
+  mail.attached = attached
+  for guid in pairs(mail.allowed) do
+    if not attached[guid] then
+      mail.allowed[guid] = nil  -- taken out again: ask again next time
+    end
+  end
+
+  for _, info in ipairs(new) do
+    local name = info.link or ("item " .. tostring(info.id))
+    Print("|cffff4040Warning:|r your favorite item " .. name .. " is attached to a letter.")
+    Alarm("Favorite item in your letter: " .. name)
+  end
+
+  local waiting = UnapprovedAttachments()
+  if #waiting > 0 then
+    mailPopup = mailPopup or CreateMailPopup()
+    mailPopup.body:SetText(ItemLines(waiting))
+    mailPopup:Fit()
+    mailPopup:Show()
+    ApplySendBlock()
+  else
+    if mailPopup then
+      mailPopup:Hide()
+    end
+    if wasBlocked then
+      RestoreSendButton()
+    end
+  end
+end
+
+local function MailSent()
+  if mail.sending then
+    for _, info in ipairs(mail.sending) do
+      Print("You mailed your favorite item " .. (info.link or ("item " .. tostring(info.id))) .. ".")
+    end
+  end
+  mail.sending = nil
+  mail.attached, mail.allowed = {}, {}
+end
+
+local function MailClosed()
+  mailOpen = false
+  mail.attached, mail.allowed, mail.sending = {}, {}, nil
+  if mailPopup then
+    mailPopup:Hide()
+  end
+end
+
+-------------------------------------------------------------------------------
 -- Tooltip line
 -------------------------------------------------------------------------------
 
@@ -847,6 +1235,9 @@ local function HookTooltips()
   TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tooltip, data)
     if tooltip == GameTooltip and data and IsFavorite(data.guid) then
       tooltip:AddLine(HEART_INLINE .. " Favorite", 1, 0.44, 0.66)
+      if IsDisenchantTargeting() then
+        tooltip:AddLine("Don't disenchant this one!", 1, 0.25, 0.25)
+      end
     end
   end)
 end
@@ -995,8 +1386,55 @@ events:RegisterEvent("MERCHANT_UPDATE")
 events:RegisterEvent("BAG_UPDATE_DELAYED")
 events:RegisterEvent("BANKFRAME_OPENED")
 events:RegisterEvent("PLAYERBANKSLOTS_CHANGED")
+events:RegisterEvent("ITEM_LOCK_CHANGED")
+events:RegisterEvent("MAIL_SHOW")
+events:RegisterEvent("MAIL_CLOSED")
+events:RegisterEvent("MAIL_SEND_INFO_UPDATE")
+events:RegisterEvent("MAIL_SEND_SUCCESS")
+events:RegisterEvent("MAIL_FAILED")
+events:RegisterUnitEvent("UNIT_SPELLCAST_START", "player")
+events:RegisterUnitEvent("UNIT_SPELLCAST_STOP", "player")
+events:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED", "player")
+events:RegisterUnitEvent("UNIT_SPELLCAST_FAILED", "player")
+events:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
 
-events:SetScript("OnEvent", function(_, event, arg1)
+events:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
+  if event == "UNIT_SPELLCAST_START" then
+    if IsDisenchant(arg3) then
+      StartDisenchant(arg2)
+    end
+    return
+  elseif event == "UNIT_SPELLCAST_STOP" or event == "UNIT_SPELLCAST_INTERRUPTED"
+    or event == "UNIT_SPELLCAST_FAILED" or event == "UNIT_SPELLCAST_SUCCEEDED" then
+    -- Only the cast that started it: pressing Disenchant again mid-cast fails
+    -- with its own cast ID.
+    if disenchant and IsDisenchant(arg3) and (disenchant.cast == nil or disenchant.cast == arg2) then
+      EndDisenchant()
+    end
+    return
+  elseif event == "ITEM_LOCK_CHANGED" then
+    CheckDisenchant()
+    CheckMail()
+    return
+  elseif event == "MAIL_SHOW" then
+    mailOpen = true
+    InstallSendHooks()
+    CheckMail()
+    return
+  elseif event == "MAIL_CLOSED" then
+    MailClosed()
+    return
+  elseif event == "MAIL_SEND_INFO_UPDATE" then
+    CheckMail()
+    return
+  elseif event == "MAIL_SEND_SUCCESS" then
+    MailSent()
+    return
+  elseif event == "MAIL_FAILED" then
+    mail.sending = nil
+    return
+  end
+
   if event == "ADDON_LOADED" and arg1 == ADDON_NAME then
     FavoriteItemsDB = FavoriteItemsDB or {}
     FavoriteItemsDB.guids = FavoriteItemsDB.guids or {}
@@ -1004,6 +1442,8 @@ events:SetScript("OnEvent", function(_, event, arg1)
   elseif event == "PLAYER_LOGIN" then
     link:Init()
     HookTooltips()
+    dePopup = CreateDisenchantPopup()  -- has a secure button: build it out of combat
+    InstallSendHooks()
     -- Bag contents aren't always ready right at login.
     C_Timer.After(3, MigrateItemIDFavorites)
     if useBaganator then

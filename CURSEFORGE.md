@@ -4,9 +4,9 @@
 
 # FavoriteItems
 
-**Mark items with a heart and get warned, with a buy-back button, when you sell one.**
+**Mark items with a heart and get warned before you sell, disenchant or mail one by mistake.**
 
-Mark the items you care about with a little heart. If one of them ends up sold to a vendor anyway, FavoriteItems tells you right away and lets you buy it back with one click.
+Mark the items you care about with a little heart. If one of them is about to be disenchanted or mailed, FavoriteItems warns you while there's still time to stop. If one ends up sold to a vendor anyway, it tells you right away and lets you buy it back with one click.
 
 ![With Baganator](https://raw.githubusercontent.com/Lundqwist/FavoriteItems/main/screenshots/baganator.png)
 
@@ -23,6 +23,8 @@ Mark the items you care about with a little heart. If one of them ends up sold t
 - **Specific items, not item types**: mark one copy of an item and the other copies stay unmarked.
 - **Sold warning**: sell a favorite and a warning pops up with a **Buy back** button, plus a raid-warning message and sound. It catches every way of selling: right-click, dragging onto the vendor, and junk sellers.
 - **Bought back = still a favorite**: buy it back before you leave the vendor and the heart comes back.
+- **Disenchant warning**: start disenchanting a favorite and you get a warning while the cast is still going, with a **Stop casting** button (moving or pressing Esc works too). While you're choosing what to disenchant, a favorite's tooltip says "Don't disenchant this one!"
+- **Mail warning**: put a favorite in a letter and a warning pops up. The **Send** button stays off until you pick **Remove it** or **Send anyway**.
 - **Tooltip line** showing "Favorite" on marked items.
 - **Minimap button** (the heart): left-click starts or stops marking, hover shows how many favorites you have, right-click opens the options.
 
@@ -50,6 +52,11 @@ Right-click the minimap button, type `/fav options`, or open the game's Options 
 - Works with **Baganator**: the heart is a Baganator corner widget, so you can move it under Baganator's settings → Icons.
 - Without Baganator it uses the default bags and bank.
 - Favorites and options are shared by all characters on your account.
+- Addons can't block a spell, so the disenchant warning comes during the cast; an instant disenchant from another addon only gets a message afterwards. Mass-mail addons skip the Send button, so for them you're told after the letter has gone.
+
+## Changes
+
+See [CHANGELOG.md](https://github.com/Lundqwist/FavoriteItems/blob/main/CHANGELOG.md).
 
 ## Source
 

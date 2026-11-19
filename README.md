@@ -1,6 +1,6 @@
 # FavoriteItems
 
-**Mark items with a heart and get warned, with a buy-back button, when you sell one.**
+**Mark items with a heart and get warned before you sell, disenchant or mail one by mistake.**
 
 A World of Warcraft: Forever addon (interface 16001).
 
@@ -19,7 +19,11 @@ A World of Warcraft: Forever addon (interface 16001).
 - A **Favorites** button sits on the lower side of the bag window (in Baganator's bottom button row, or under the default bags) and under the bank window.
 - Click it, then click items to mark or unmark them. Favorites get a small heart in the icon's upper left corner. Click **Done** (or close the bags) to stop.
 - Sell a favorite to a merchant and a warning pops up, with a **Buy back** button while the merchant is still open. A raid-warning message and sound go with it.
+- Start disenchanting a favorite and a warning pops up during the cast, with a **Stop casting** button (moving or Esc works too). If the cast finishes, the item is dropped from your favorites. While you're choosing what to disenchant, a favorite's tooltip says "Don't disenchant this one!"
+- Attach a favorite to a letter and a warning pops up; the **Send** button stays off until you pick **Remove it** or **Send anyway**. Letters sent by mass-mail addons skip the button; you get a chat message afterwards.
 - Item tooltips show a "Favorite" line.
+
+Both of these rely on the game locking an item while a spell is cast on it or while it sits in an unsent letter. Addons can't block a spell, so the disenchant warning comes during the cast, not before it.
 - A **minimap button** (the heart): left-click starts or stops marking, hover shows how many favorites you have, right-click opens the options, drag moves it.
 
 Favorites are specific items, not item types: each is saved by its item GUID in `FavoriteItemsDB`, so marking one copy of an item leaves the other copies unmarked. Only items the current character holds (bags, or the bank while it's open) can be marked; other characters' bags shown from Baganator's cache can't. If a sold favorite is bought back while the merchant is still open, it's marked again.
@@ -50,7 +54,7 @@ Copy the `FavoriteItems` folder (with `FavoriteItems.toc`, `LunarLink.lua`, `Fav
 
 ## For developers
 
-`LunarLink.lua` (minimap button and options page) is the same file in each of my mods (FavoriteItems, QuestXPTracker, LunarJournal); keep the copies alike. The description for CurseForge is in [CURSEFORGE.md](CURSEFORGE.md).
+`LunarLink.lua` (minimap button and options page) is the same file in each of my mods (FavoriteItems, QuestXPTracker, LunarJournal); keep the copies alike. The description for CurseForge is in [CURSEFORGE.md](CURSEFORGE.md); `.\tools\package.ps1` builds the upload zip in `curseforge\`. Changes per version are in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
