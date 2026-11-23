@@ -38,6 +38,15 @@ Right-click the minimap button, type `/fav options`, or open Options → AddOns 
 
 - **Show the minimap button**
 - **Mark favorites**, **List them in chat**
+- With **TradeSkillMaster** loaded: how many favorites are in TSM's **Do Not Sell** group, an **Add favorites to Do Not Sell** button, and **Remind me when a new favorite isn't in the Do Not Sell group** (on by default, at most one chat line a minute)
+
+## TradeSkillMaster: Do Not Sell group
+
+TSM lets other addons read its groups but not change them, so FavoriteItems builds a TSM import line for you: `/fav tsm` (or the button in the options) opens a window with the favorites that aren't in the group yet, already selected. Press Ctrl+C, then in TSM (`/tsm`) open **Groups**, click **Import group** above the group list, paste with Ctrl+V and import.
+
+- The first import creates a group called **Do Not Sell**. Give it a Vendoring operation with **Enable selling** off, so TSM's vendoring leaves those items alone.
+- Later imports hold only the new favorites. TSM names them **Do Not Sell 1**, **Do Not Sell 2** and so on; drag one onto **Do Not Sell** to make it a subgroup that shares its operations. All of these, and their subgroups, count as the Do Not Sell group.
+- TSM groups hold item types, not single items, so every copy of a favorite's item ends up in the group.
 
 ## Commands
 
@@ -46,6 +55,7 @@ Right-click the minimap button, type `/fav options`, or open Options → AddOns 
 | `/fav` or `/favorites` | Start or stop marking (opens your bags) |
 | `/fav list` | List your favorites in chat |
 | `/fav options` | Open the options |
+| `/fav tsm` | Copy the favorites missing from TSM's Do Not Sell group, for TSM's Import group box |
 | `/fav debug` | What the addon finds in the open bag windows |
 
 ## Install

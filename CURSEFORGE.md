@@ -36,6 +36,11 @@ Right-click the minimap button, type `/fav options`, or open the game's Options 
 
 - **Show the minimap button**: switch the heart button off if you'd rather use `/fav`.
 - **Mark favorites** and **List them in chat**.
+- With **TradeSkillMaster** loaded: **Add favorites to Do Not Sell** and a reminder when a new favorite isn't in that group yet.
+
+## TradeSkillMaster
+
+TSM doesn't let other addons change its groups, so `/fav tsm` gives you an import line with the favorites that aren't in TSM's **Do Not Sell** group yet. Copy it (Ctrl+C), then in TSM open **Groups → Import group** and paste it. Give the Do Not Sell group a Vendoring operation with **Enable selling** off. Later imports are named "Do Not Sell 1" and so on; drag them onto Do Not Sell to make them subgroups. TSM groups hold item types, so every copy of a favorite's item is included.
 
 ## Commands
 
@@ -44,6 +49,7 @@ Right-click the minimap button, type `/fav options`, or open the game's Options 
 | `/fav` or `/favorites` | Start or stop marking (opens your bags) |
 | `/fav list` | List your favorites in chat |
 | `/fav options` | Open the options |
+| `/fav tsm` | Add favorites to TradeSkillMaster's Do Not Sell group (import line) |
 | `/fav debug` | What the addon finds in the open bag windows |
 
 ## Compatibility
@@ -51,6 +57,7 @@ Right-click the minimap button, type `/fav options`, or open the game's Options 
 - Made for **World of Warcraft: Forever**.
 - Works with **Baganator**: the heart is a Baganator corner widget, so you can move it under Baganator's settings → Icons.
 - Without Baganator it uses the default bags and bank.
+- Optional **TradeSkillMaster** support: a Do Not Sell group for your favorites.
 - Favorites and options are shared by all characters on your account.
 - Addons can't block a spell, so the disenchant warning comes during the cast; an instant disenchant from another addon only gets a message afterwards. Mass-mail addons skip the Send button, so for them you're told after the letter has gone.
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.0 (2026-11-23)
+
+- **TradeSkillMaster support**: with TSM loaded, the options page shows how many favorites are in TSM's **Do Not Sell** group, and **Add favorites to Do Not Sell** (or `/fav tsm`) opens a window with a TSM import line for the favorites that aren't in it yet. Paste it into TSM's **Groups → Import group**. TSM doesn't let other addons change its groups, so this goes through TSM's own import.
+- Marking a favorite that isn't in the Do Not Sell group gives a short reminder in chat (at most once a minute; can be switched off in the options).
+- Groups named "Do Not Sell 1", "Do Not Sell 2" and so on, which TSM makes on later imports, and all subgroups count as the Do Not Sell group.
+
 ## 1.3.0 (2026-11-19)
 
 - **Disenchant warning**: starting to disenchant a favorite gives a raid warning, a sound and a pop-up while the cast is still going, with a **Stop casting** button (moving or Esc works too). If the cast finishes, the item is dropped from your favorites; if it's stopped, you get a "Phew" message.

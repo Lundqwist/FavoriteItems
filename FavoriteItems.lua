@@ -97,6 +97,7 @@ local function IsFavorite(guid)
 end
 
 local RefreshAllHearts -- defined further down
+local RemindTSM        -- defined further down (TradeSkillMaster section)
 
 local function SetFavorite(guid, itemID, link, on)
   if not guid or not db then
@@ -123,6 +124,7 @@ local function ToggleFavorite(guid, itemID, link)
   local name = link or ("item " .. itemID)
   if on then
     Print(HEART_INLINE .. " " .. name .. " is now a favorite.")
+    RemindTSM(itemID, link)
   else
     Print(name .. " is no longer a favorite.")
   end
@@ -1261,6 +1263,181 @@ local function MigrateItemIDFavorites()
 end
 
 -------------------------------------------------------------------------------
+-- TradeSkillMaster: a "Do Not Sell" group
+--
+-- TSM's public API (TSM_API) can read groups but not change them, so this
+-- builds a TSM import string ("group:Do Not Sell,i:123,i:456") that you paste
+-- into TSM's "Import group" box. TSM groups hold item types, not single items,
+-- so every copy of a favorite's item type ends up in the group.
+--
+-- TSM names an imported group after the string, adding " 1", " 2" ... when
+-- the name is taken. Groups named "Do Not Sell", "Do Not Sell 1" and so on,
+-- and their subgroups, all count as the Do Not Sell group here.
+-------------------------------------------------------------------------------
+
+local TSM_GROUP = "Do Not Sell"
+local TSM_PATH_SEP = "`"   -- TSM's group path separator
+
+local function HasTSM()
+  return TSM_API ~= nil and type(TSM_API.GetGroupPathByItem) == "function"
+end
+
+local function TSMItemString(info)
+  if info.link and TSM_API and TSM_API.ToItemString then
+    local ok, itemString = pcall(TSM_API.ToItemString, info.link)
+    if ok and itemString then
+      return itemString
+    end
+  end
+  return info.id and ("i:" .. info.id)
+end
+
+-- "Do Not Sell", "Do Not Sell 2", "Do Not Sell`Weapons" ...
+local function IsDoNotSellPath(path)
+  if type(path) ~= "string" then
+    return false
+  end
+  local top = path:match("^([^" .. TSM_PATH_SEP .. "]+)") or path
+  return top == TSM_GROUP or top:match("^" .. TSM_GROUP .. " %d+$") ~= nil
+end
+
+local function InDoNotSellGroup(itemString)
+  if not HasTSM() or not itemString then
+    return false
+  end
+  local ok, path = pcall(TSM_API.GetGroupPathByItem, itemString)
+  return ok and IsDoNotSellPath(path)
+end
+
+local function DoNotSellGroupExists()
+  if not (TSM_API and TSM_API.GetGroupPaths) then
+    return false
+  end
+  local ok, paths = pcall(TSM_API.GetGroupPaths, {})
+  if ok and paths then
+    for _, path in ipairs(paths) do
+      if IsDoNotSellPath(path) then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+-- Favorite item types: total, and those not in the Do Not Sell group yet
+-- (list of { itemString, link })
+local function TSMFavoriteStatus()
+  local seen, total, missing = {}, 0, {}
+  if not db then
+    return 0, missing
+  end
+  for _, info in pairs(db.guids) do
+    local itemString = TSMItemString(info)
+    if itemString and not seen[itemString] then
+      seen[itemString] = true
+      total = total + 1
+      if not InDoNotSellGroup(itemString) then
+        table.insert(missing, { itemString = itemString, link = info.link })
+      end
+    end
+  end
+  return total, missing
+end
+
+local tsmDialog
+
+local function CreateTSMDialog()
+  local f = MakeDialog("FavoriteItemsTSMExport", "Favorites for TSM")
+  f:SetWidth(440)
+  f.body:SetWidth(390)
+  f.hint:SetWidth(390)
+
+  f.box = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
+  f.box:SetSize(370, 24)
+  f.box:SetPoint("TOP", f.hint, "BOTTOM", 0, -10)
+  f.box:SetAutoFocus(false)
+  f.box:SetScript("OnEscapePressed", function() f:Hide() end)
+  -- Keep the text as it is, whatever is typed; just select it again.
+  f.box:SetScript("OnTextChanged", function(self, userInput)
+    if userInput and f.text then
+      self:SetText(f.text)
+      self:HighlightText()
+    end
+  end)
+  f.box:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
+
+  f.close = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+  f.close:SetSize(120, 24)
+  f.close:SetPoint("BOTTOM", f, "BOTTOM", 0, 18)
+  f.close:SetText("Close")
+  f.close:SetScript("OnClick", function() f:Hide() end)
+
+  f.Fit = function(self)
+    self:SetHeight(150 + self.body:GetStringHeight() + self.hint:GetStringHeight())
+  end
+  table.insert(UISpecialFrames, "FavoriteItemsTSMExport")
+  return f
+end
+
+local function ShowTSMExport()
+  if not HasTSM() then
+    Print("TradeSkillMaster isn't loaded.")
+    return
+  end
+  local total, missing = TSMFavoriteStatus()
+  if total == 0 then
+    Print("No favorites yet.")
+    return
+  end
+  if #missing == 0 then
+    Print(("All %d favorite item types are already in TSM's %s group."):format(total, TSM_GROUP))
+    return
+  end
+
+  local parts = { "group:" .. TSM_GROUP }
+  local links = {}
+  for _, entry in ipairs(missing) do
+    table.insert(parts, entry.itemString)
+    table.insert(links, { id = entry.itemString, link = entry.link })
+  end
+
+  tsmDialog = tsmDialog or CreateTSMDialog()
+  tsmDialog.text = table.concat(parts, ",")
+  local lines = ItemLines(links)
+  if #links > 6 then
+    lines = ItemLines({ unpack(links, 1, 6) }) .. ("\n... and %d more"):format(#links - 6)
+  end
+  tsmDialog.body:SetText(("%d favorite item type(s) aren't in TSM's %s group:\n%s"):format(#missing, TSM_GROUP, lines))
+  local steps = "Press Ctrl+C to copy the line below. In TSM (/tsm) open Groups, click Import group above the group list, paste it with Ctrl+V and import."
+  if DoNotSellGroupExists() then
+    steps = steps .. " You already have a " .. TSM_GROUP .. " group, so TSM names this one " .. TSM_GROUP
+      .. " 1: drag it onto " .. TSM_GROUP .. " to make it a subgroup that shares its operations."
+  else
+    steps = steps .. " Then give the new " .. TSM_GROUP .. " group a Vendoring operation with Enable selling off."
+  end
+  tsmDialog.hint:SetText(steps)
+  tsmDialog.box:SetText(tsmDialog.text)
+  tsmDialog:Fit()
+  tsmDialog:Show()
+  tsmDialog.box:SetFocus()
+  tsmDialog.box:HighlightText()
+end
+
+-- After marking a favorite: a reminder when TSM doesn't have it in the group
+-- (at most once a minute, so marking many items doesn't fill the chat).
+local lastReminder = 0
+function RemindTSM(itemID, link)
+  if not (db and db.tsmRemind and HasTSM()) or GetTime() - lastReminder < 60 then
+    return
+  end
+  local itemString = TSMItemString({ id = itemID, link = link })
+  if itemString and not InDoNotSellGroup(itemString) then
+    lastReminder = GetTime()
+    Print(("It isn't in TSM's %s group yet. Type %s/fav tsm|r to add your favorites there."):format(TSM_GROUP, COLOR))
+  end
+end
+
+-------------------------------------------------------------------------------
 -- Minimap button and options page (LunarLink.lua)
 -------------------------------------------------------------------------------
 
@@ -1323,10 +1500,31 @@ local link = ns.NewLunarLink({
       StartOrStopMarking()
     end)
     l:AddButton("List them in chat", 150, ListFavorites, mark)
+
+    if HasTSM() then
+      l:AddHeader("TradeSkillMaster")
+      l:AddText(function()
+        local total, missing = TSMFavoriteStatus()
+        return ("%s%d|r of %d favorite item types are in TSM's %s group."):format(COLOR, total - #missing, total, TSM_GROUP)
+      end, "GameFontHighlight")
+      l:AddButton("Add favorites to " .. TSM_GROUP, 200, function()
+        if SettingsPanel and SettingsPanel:IsShown() and HideUIPanel then
+          HideUIPanel(SettingsPanel)
+        end
+        ShowTSMExport()
+      end)
+      l:AddCheckbox("Remind me when a new favorite isn't in the " .. TSM_GROUP .. " group",
+        function() return db and db.tsmRemind end,
+        function(on) db.tsmRemind = on end)
+      l:AddText("TSM groups hold item types, so every copy of a favorite's item goes in the group. "
+        .. "Give the group a Vendoring operation with Enable selling off, so TSM's vendoring leaves them alone.",
+        "GameFontDisableSmall")
+    end
   end,
   help = {
     "/fav - start or stop marking favorites (opens your bags)",
     "/fav list - list all favorites in chat",
+    "/fav tsm - add favorites to TradeSkillMaster's Do Not Sell group",
     "/fav options - this page",
     "/fav debug - what the addon finds in the open bag windows",
   },
@@ -1347,6 +1545,8 @@ SlashCmdList.FAVORITEITEMS = function(msg)
     ListFavorites()
   elseif msg == "options" or msg == "config" then
     link:OpenOptions()
+  elseif msg == "tsm" then
+    ShowTSMExport()
   elseif msg == "debug" then
     local favorites = 0
     for _ in pairs(db.guids) do
@@ -1366,6 +1566,7 @@ SlashCmdList.FAVORITEITEMS = function(msg)
     Print("/fav - start or stop marking favorites (opens your bags)")
     Print("/fav list - list all favorites")
     Print("/fav options - minimap button and options")
+    Print("/fav tsm - add favorites to TradeSkillMaster's " .. TSM_GROUP .. " group")
     Print("/fav debug - what the addon finds in the open bag windows")
   else
     StartOrStopMarking()
@@ -1438,6 +1639,9 @@ events:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
   if event == "ADDON_LOADED" and arg1 == ADDON_NAME then
     FavoriteItemsDB = FavoriteItemsDB or {}
     FavoriteItemsDB.guids = FavoriteItemsDB.guids or {}
+    if FavoriteItemsDB.tsmRemind == nil then
+      FavoriteItemsDB.tsmRemind = true
+    end
     db = FavoriteItemsDB
   elseif event == "PLAYER_LOGIN" then
     link:Init()
